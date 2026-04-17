@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ws-tcp-bridge — client example</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+      label { display: block; margin-top: .75rem; }
+      input, textarea { width: 100%; font-family: monospace; box-sizing: border-box; padding: .4rem; }
+      button { margin-top: 1rem; padding: .5rem 1rem; }
+      #log { margin-top: 1rem; padding: .75rem; background: #111; color: #0f0; font-family: monospace; font-size: 12px; max-height: 300px; overflow: auto; white-space: pre-wrap; }
+      .warn { color: #b00; font-size: 13px; margin-top: 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>ws-tcp-bridge client example</h1>
+    <p>
+      This page signs a bridge URL and opens a WebSocket. The bridge forwards
+      raw bytes to the destination TCP host:port. Anything typed in the "Send"
+      area is transmitted as bytes. This is a raw-TCP test tool — for SFTP,
+      use the
+      <a href="https://github.com/neelyxlabs/sshclient-sftp-wasm"
+        ><code>@neelyxlabs/sshclient-sftp-wasm</code></a
+      >
+      library as the client.
+    </p>
+
+    <label>
+      Bridge base URL (without path)
+      <input id="bridge" value="wss://ws-tcp-bridge-staging.example.workers.dev" />
+    </label>
+    <label>
+      HMAC secret
+      <input id="secret" type="password" placeholder="demo-only; do not paste prod secrets" />
+    </label>
+    <label>
+      Destination (host:port, must be allowlisted server-side)
+      <input id="dest" value="sftp.example.com:22" />
+    </label>
+    <label>
+      TTL (seconds)
+      <input id="ttl" type="number" value="300" min="10" max="900" />
+    </label>
+
+    <button id="connect">Sign URL and open WebSocket</button>
+
+    <div id="log">(not connected)</div>
+
+    <p class="warn">
+      <strong>Warning:</strong> pasting a production HMAC secret into a public
+      web page is a security anti-pattern. This page exists for local testing
+      against a disposable secret. Real consumers should sign URLs inside
+      their own codebase, not copy secrets into random demo pages.
+    </p>
+
+    <script type="module">
+      const log = (s) => {
+        const el = document.getElementById("log");
+        el.textContent += s + "\n";
+        el.scrollTop = el.scrollHeight;
+      };
+
+      async function signBridgeUrl(bridgeBaseUrl, hmacSecret, dest, ttlSeconds) {
+        const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+        const key = await crypto.subtle.importKey(
+          "raw",
+          new TextEncoder().encode(hmacSecret),
+          { name: "HMAC", hash: "SHA-256" },
+          false,
+          ["sign"]
+        );
+        const sigBuf = await crypto.subtle.sign(
+          "HMAC",
+          key,
+          new TextEncoder().encode(`${dest}|${exp}`)
+        );
+        const sigHex = Array.from(new Uint8Array(sigBuf))
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("");
+        const url = new URL(bridgeBaseUrl.replace(/^wss?/, "https"));
+        url.searchParams.set("dest", dest);
+        url.searchParams.set("exp", String(exp));
+        url.searchParams.set("sig", sigHex);
+        return url.toString().replace(/^https?/, "wss");
+      }
+
+      document.getElementById("connect").addEventListener("click", async () => {
+        document.getElementById("log").textContent = "";
+        const bridge = document.getElementById("bridge").value.trim();
+        const secret = document.getElementById("secret").value;
+        const dest = document.getElementById("dest").value.trim();
+        const ttl = parseInt(document.getElementById("ttl").value, 10);
+
+        const url = await signBridgeUrl(bridge, secret, dest, ttl);
+        log("→ opening " + url.replace(/sig=[a-f0-9]+/, "sig=<redacted>"));
+
+        const ws = new WebSocket(url);
+        ws.binaryType = "arraybuffer";
+        ws.onopen = () => log("← ws open (TCP to " + dest + " established)");
+        ws.onmessage = (e) => {
+          const bytes = new Uint8Array(e.data);
+          log(
+            `← recv ${bytes.length} bytes: ${bytesToPrintable(bytes).slice(
+              0,
+              100
+            )}${bytes.length > 100 ? "…" : ""}`
+          );
+        };
+        ws.onclose = (e) => log(`← ws close code=${e.code} reason=${e.reason}`);
+        ws.onerror = () => log("← ws error");
+      });
+
+      function bytesToPrintable(bytes) {
+        let s = "";
+        for (const b of bytes) {
+          s += b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : ".";
+        }
+        return s;
+      }
+    </script>
+  </body>
+</html>

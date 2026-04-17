@@ -1,0 +1,14 @@
+name = "ws-tcp-bridge"
+main = "src/worker.ts"
+compatibility_date = "2026-04-01"
+
+# All env-specific config (JWKS_URL, JWT_ISSUER, JWT_REQUIRED_PROFILE,
+# ALLOWED_DESTS, HMAC_SECRET) is set in the Cloudflare dashboard only.
+# Nothing sensitive is committed to this repo.
+#
+# Deployment is handled by Cloudflare's native Git integration
+# (Workers > Settings > Build), not GitHub Actions.
+
+[observability]
+enabled = true
+head_sampling_rate = 1.0
