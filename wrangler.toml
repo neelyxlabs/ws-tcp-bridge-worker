@@ -1,4 +1,4 @@
-name = "ws-tcp-bridge-prod"
+name = "ws-tcp-bridge"
 main = "src/worker.ts"
 compatibility_date = "2026-04-01"
 
